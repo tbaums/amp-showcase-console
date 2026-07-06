@@ -133,6 +133,12 @@
       box-shadow: 0 0 0 3px rgba(210,153,34,0.25);
       animation: pulse 0.9s ease-in-out infinite alternate;
     }
+    /* live = auto-poll active + last fetch fresh (green, gentle pulse). */
+    .sync-dot.live {
+      background: var(--green);
+      box-shadow: 0 0 0 3px rgba(63,185,80,0.22);
+      animation: pulse 1.6s ease-in-out infinite alternate;
+    }
     @keyframes pulse { from { opacity: 0.4; } to { opacity: 1; } }
 
     /* ── Toolbar ── */
@@ -302,6 +308,9 @@
     .badge-amber { color: var(--amber);  background: rgba(210,153,34,0.12); border-color: rgba(210,153,34,0.35); }
     .badge-red   { color: var(--red);    background: rgba(248,81,73,0.12);  border-color: rgba(248,81,73,0.35); }
     .badge-grey  { color: var(--grey);   background: rgba(110,118,129,0.12);border-color: rgba(110,118,129,0.35); }
+    /* RUNNING = a kickoff in flight; amber + pulse so it reads as "live/active". */
+    .badge-run   { color: var(--amber);  background: rgba(210,153,34,0.12); border-color: rgba(210,153,34,0.45);
+                   animation: pulse 0.9s ease-in-out infinite alternate; }
 
     .row-actions { display: inline-flex; gap: 6px; justify-content: flex-end; }
 

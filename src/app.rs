@@ -35,6 +35,9 @@ pub struct AppState {
     pub sync_sha: RwSignal<Option<String>>,
     pub last_synced_at: RwSignal<Option<String>>,
     pub syncing: RwSignal<bool>,
+    /// True while the 10s auto-poll is active and the last fetch succeeded —
+    /// i.e. the dashboard is showing live/fresh data. Drives the meta-bar dot.
+    pub live: RwSignal<bool>,
 }
 
 impl AppState {
@@ -71,27 +74,23 @@ pub fn App() -> impl IntoView {
         sync_sha: RwSignal::new(None),
         last_synced_at: RwSignal::new(storage::load_last_synced_at()),
         syncing: RwSignal::new(false),
+        live: RwSignal::new(false),
     };
     provide_context(state);
 
-    // Boot: if we already have a config, pull the current state.json.
+    // Boot + live auto-poll: pull state.json now, then re-poll every ~10s so the
+    // dashboard reflects the executor's writes (deploy status, run outcomes)
+    // without a manual Refresh. The dot goes green while this is live.
     if configured {
-        spawn_local(async move {
-            let gh = state.config.get_untracked().to_github_config();
-            match sync::fetch_state(&gh).await {
-                Ok(remote) => {
-                    state.sync_sha.set(Some(remote.sha));
-                    state.state.set(remote.state);
-                    let ts = current_datetime();
-                    storage::save_last_synced_at(&ts);
-                    state.last_synced_at.set(Some(ts));
-                }
-                Err(SyncError::NotFound) => {
-                    state.show_toast("No state.json yet — create one in Setup");
-                }
-                Err(e) => leptos::logging::warn!("Boot pull failed: {e}"),
-            }
-        });
+        poll(state, false); // initial pull
+        let cb = Closure::<dyn Fn()>::new(move || poll(state, false));
+        if let Some(window) = web_sys::window() {
+            let _ = window.set_interval_with_callback_and_timeout_and_arguments_0(
+                cb.as_ref().unchecked_ref::<js_sys::Function>(),
+                POLL_INTERVAL_MS,
+            );
+        }
+        cb.forget(); // the interval owns it for the life of the page
     }
 
     view! {
@@ -150,6 +149,40 @@ fn cmd_state_class(state: &str) -> &'static str {
         "error" => "badge badge-red",
         _ => "badge badge-amber",
     }
+}
+
+/// A run (kickoff) that's still in flight — enqueued but not yet marked done/error
+/// by the executor. This is what "RUNNING" means for a deployment.
+fn is_running_kickoff(c: &Command) -> bool {
+    c.action == "kickoff" && c.state == "pending"
+}
+
+/// True if a kickoff is currently in flight for `scenario` — used to show a live
+/// RUNNING badge on the deployment (derived from the command queue, so it clears
+/// itself the moment the executor marks the run done/error; never gets stuck).
+fn scenario_is_running(cs: &ConsoleState, scenario: &str) -> bool {
+    cs.commands
+        .iter()
+        .any(|c| is_running_kickoff(c) && c.scenario.as_deref() == Some(scenario))
+}
+
+/// Label + badge class for a command in the Recent-commands panel. A pending
+/// kickoff reads as "running" (pulsing), not the raw "pending".
+fn command_state_display(c: &Command) -> (String, &'static str) {
+    if is_running_kickoff(c) {
+        ("running".to_string(), "badge badge-run")
+    } else {
+        (c.state.clone(), cmd_state_class(&c.state))
+    }
+}
+
+/// The "Recent commands" history: newest first, capped to `limit`. (Renamed from
+/// the old "Pending commands" panel, which misleadingly listed done ones too.)
+fn command_history(cs: &ConsoleState, limit: usize) -> Vec<Command> {
+    let mut c = cs.commands.clone();
+    c.reverse();
+    c.truncate(limit);
+    c
 }
 
 /// Optimistically fold a queued command into a ConsoleState: nudge the affected
@@ -228,7 +261,26 @@ fn enqueue_command(state: AppState, action: &str, scenario: Option<String>) {
     });
 }
 
-fn refresh(state: AppState) {
+/// Milliseconds between live auto-polls of state.json. ~10s keeps the dashboard
+/// feeling live (executor writes back deploy status / run outcomes) without
+/// hammering the GitHub Contents API (≤360 reads/hr, well within the 5000/hr
+/// authenticated limit).
+pub const POLL_INTERVAL_MS: i32 = 10_000;
+
+/// Fetch state.json and fold it into the UI. `announce=true` (manual Refresh)
+/// shows toasts; the boot pull and the 10s auto-poll run silently. Drives the
+/// `live` signal: green (live/fresh) on success, grey (stale/paused) on failure
+/// or when not configured — which is what the meta-bar dot reflects.
+fn poll(state: AppState, announce: bool) {
+    if !state.config.get_untracked().is_configured() {
+        state.live.set(false);
+        return;
+    }
+    // Don't stack fetches — if one is already in flight (e.g. a 10s tick landing
+    // on a manual Refresh), let it finish. syncing is always reset below.
+    if state.syncing.get_untracked() {
+        return;
+    }
     let gh = state.config.get_untracked().to_github_config();
     state.syncing.set(true);
     spawn_local(async move {
@@ -239,12 +291,25 @@ fn refresh(state: AppState) {
                 let ts = current_datetime();
                 storage::save_last_synced_at(&ts);
                 state.last_synced_at.set(Some(ts));
-                state.show_toast("Refreshed ↓");
+                state.live.set(true);
+                if announce {
+                    state.show_toast("Refreshed ↓");
+                }
             }
             Err(SyncError::NotFound) => {
-                state.show_toast("No state.json yet — create one in Setup")
+                state.live.set(false);
+                if announce {
+                    state.show_toast("No state.json yet — create one in Setup");
+                }
             }
-            Err(e) => state.show_toast(format!("Refresh failed: {e}")),
+            Err(e) => {
+                state.live.set(false); // last poll failed -> not live/fresh
+                if announce {
+                    state.show_toast(format!("Refresh failed: {e}"));
+                } else {
+                    leptos::logging::warn!("Auto-poll failed: {e}");
+                }
+            }
         }
         state.syncing.set(false);
     });
@@ -466,7 +531,9 @@ fn DashboardView() -> impl IntoView {
     let syncing = move || state.syncing.get();
 
     let deployments = move || state.state.get().deployments;
-    let commands = move || state.state.get().commands;
+    // The panel is a *history* view (renamed from the misleading "Pending
+    // commands", which showed done ones too): newest first, capped, state shown.
+    let recent_commands = move || command_history(&state.state.get(), 15);
 
     view! {
         <div class="page">
@@ -496,11 +563,20 @@ fn DashboardView() -> impl IntoView {
                     <span class="meta-v">{last_synced}</span>
                 </div>
                 <div class="meta-item meta-right">
-                    <span class="sync-dot" class:on=syncing></span>
+                    <span
+                        class="sync-dot"
+                        class:on=syncing
+                        class:live=move || state.live.get() && !syncing()
+                        title=move || {
+                            if syncing() { "syncing…" }
+                            else if state.live.get() { "live — auto-refreshing every 10s" }
+                            else { "paused / stale — last refresh failed or not connected" }
+                        }
+                    ></span>
                     <button
                         class="btn btn-secondary btn-sm"
                         prop:disabled=syncing
-                        on:click=move |_| refresh(state)
+                        on:click=move |_| poll(state, true)
                     >
                         {move || if syncing() { "Syncing…" } else { "Refresh" }}
                     </button>
@@ -554,7 +630,24 @@ fn DashboardView() -> impl IntoView {
                                 <tbody>
                                     <For
                                         each=deployments
-                                        key=|d| d.name.clone()
+                                        // Key on the rendered fields, not just the name: a keyed
+                                        // <For> won't re-render a row whose key is unchanged, so
+                                        // this is what makes status/url/updated/last_run refresh
+                                        // live on each ~10s poll. (Command-driven RUNNING is
+                                        // handled by a reactive closure inside the row.)
+                                        key=|d| {
+                                            format!(
+                                                "{}|{}|{}|{}|{}",
+                                                d.name,
+                                                d.status,
+                                                d.public_url.clone().unwrap_or_default(),
+                                                d.updated_at.clone().unwrap_or_default(),
+                                                d.last_run
+                                                    .as_ref()
+                                                    .map(|r| format!("{}:{}", r.kickoff_id, r.state))
+                                                    .unwrap_or_default(),
+                                            )
+                                        }
                                         children=move |d: Deployment| { deployment_row(state, d) }
                                     />
                                 </tbody>
@@ -565,11 +658,11 @@ fn DashboardView() -> impl IntoView {
                 }
             }}
 
-            <div class="section-label mt">"Pending commands"</div>
+            <div class="section-label mt">"Recent commands"</div>
             {move || {
-                let cmds = commands();
+                let cmds = recent_commands();
                 if cmds.is_empty() {
-                    view! { <div class="muted mb">"No commands queued."</div> }.into_any()
+                    view! { <div class="muted mb">"No commands yet."</div> }.into_any()
                 } else {
                     view! {
                         <div class="table-wrap">
@@ -584,21 +677,22 @@ fn DashboardView() -> impl IntoView {
                                 </thead>
                                 <tbody>
                                     <For
-                                        each=commands
+                                        each=recent_commands
                                         key=|c| c.id.clone()
                                         children=move |c: Command| {
                                             let scope = c
                                                 .scenario
                                                 .clone()
                                                 .unwrap_or_else(|| "all".to_string());
+                                            // A pending kickoff is a run in flight — label it
+                                            // "running" (pulsing), not the raw "pending".
+                                            let (label, cls) = command_state_display(&c);
                                             view! {
                                                 <tr>
                                                     <td class="mono-strong">{c.action.clone()}</td>
                                                     <td>{scope}</td>
                                                     <td>
-                                                        <span class=cmd_state_class(&c.state)>
-                                                            {c.state.clone()}
-                                                        </span>
+                                                        <span class=cls>{label}</span>
                                                     </td>
                                                     <td class="muted">{c.requested_at.clone()}</td>
                                                 </tr>
@@ -668,7 +762,24 @@ fn deployment_row(state: AppState, d: Deployment) -> impl IntoView {
             <td class="mono-strong">{scenario.clone()}</td>
             <td>{d.name.clone()}</td>
             <td>
-                <span class=status_class(&d.status)>{d.status.clone()}</span>
+                {
+                    // Reactive: shows RUNNING while a kickoff for this scenario is
+                    // in flight (derived from the command queue, so it self-clears
+                    // when the executor marks the run done/error), otherwise the
+                    // deployment's own status. Reading the signal here keeps it
+                    // live even though the row itself is keyed/memoized.
+                    let status_str = d.status.clone();
+                    let sc = scenario.clone();
+                    move || {
+                        if scenario_is_running(&state.state.get(), &sc) {
+                            view! { <span class="badge badge-run" title="a run is in flight">"Running"</span> }
+                                .into_any()
+                        } else {
+                            view! { <span class=status_class(&status_str)>{status_str.clone()}</span> }
+                                .into_any()
+                        }
+                    }
+                }
                 {run_cell}
             </td>
             <td>{url_cell}</td>
@@ -694,7 +805,11 @@ fn deployment_row(state: AppState, d: Deployment) -> impl IntoView {
                         }
                     }}
                     {move || {
-                        if is_online {
+                        // Show Run only when Online AND no run is already in flight
+                        // (reactive, so it disables itself the moment a kickoff is
+                        // queued and re-appears when the run finishes).
+                        let running = scenario_is_running(&state.state.get(), &sc_run);
+                        if is_online && !running {
                             let sc = sc_run.clone();
                             view! {
                                 <button
@@ -729,9 +844,22 @@ fn deployment_row(state: AppState, d: Deployment) -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::apply_command;
+    use super::{
+        apply_command, command_history, command_state_display, is_running_kickoff,
+        scenario_is_running,
+    };
     use crate::models::{Command, ConsoleState, Deployment};
     use wasm_bindgen_test::*;
+
+    fn cmd_full(id: &str, action: &str, scenario: Option<&str>, state: &str) -> Command {
+        Command {
+            id: id.into(),
+            action: action.into(),
+            scenario: scenario.map(str::to_string),
+            requested_at: "2026-07-06T00:00:00Z".into(),
+            state: state.into(),
+        }
+    }
 
     fn dep(sector: &str, slug: &str, status: &str) -> Deployment {
         Deployment {
@@ -801,5 +929,54 @@ mod tests {
         apply_command(&mut cs, &cmd("frobnicate", Some("pharma/payload")));
         assert_eq!(cs.deployments[0].status, "Online"); // unchanged
         assert_eq!(cs.commands.len(), 1); // still queued
+    }
+
+    // ── #3 RUNNING state ──────────────────────────────────────────────────────
+    #[wasm_bindgen_test]
+    fn a_pending_kickoff_is_running_but_a_done_one_is_not() {
+        assert!(is_running_kickoff(&cmd_full("k", "kickoff", Some("a/b"), "pending")));
+        assert!(!is_running_kickoff(&cmd_full("k", "kickoff", Some("a/b"), "done")));
+        // Only kickoffs are "running" — a pending provision isn't a run.
+        assert!(!is_running_kickoff(&cmd_full("p", "provision", Some("a/b"), "pending")));
+    }
+
+    #[wasm_bindgen_test]
+    fn scenario_is_running_tracks_the_in_flight_kickoff_only() {
+        let mut cs = ConsoleState::initial("org");
+        cs.commands = vec![cmd_full("1", "kickoff", Some("pharma/your-own-data"), "pending")];
+        assert!(scenario_is_running(&cs, "pharma/your-own-data"));
+        assert!(!scenario_is_running(&cs, "pharma/no-code-trigger")); // different scenario
+        // Once the executor marks it done, RUNNING clears (self-healing, never stuck).
+        cs.commands[0].state = "done".into();
+        assert!(!scenario_is_running(&cs, "pharma/your-own-data"));
+    }
+
+    #[wasm_bindgen_test]
+    fn command_state_display_labels_a_pending_kickoff_running() {
+        let (label, cls) = command_state_display(&cmd_full("k", "kickoff", Some("a/b"), "pending"));
+        assert_eq!(label, "running");
+        assert_eq!(cls, "badge badge-run");
+        // Non-kickoff pending keeps its raw state.
+        let (label, _) = command_state_display(&cmd_full("p", "provision", None, "pending"));
+        assert_eq!(label, "pending");
+        let (label, _) = command_state_display(&cmd_full("d", "teardown", None, "done"));
+        assert_eq!(label, "done");
+    }
+
+    // ── #1 Recent commands: newest-first, capped ──────────────────────────────
+    #[wasm_bindgen_test]
+    fn command_history_is_newest_first_and_capped() {
+        let mut cs = ConsoleState::initial("org");
+        cs.commands = (0..20)
+            .map(|i| cmd_full(&format!("c{i}"), "provision", None, "done"))
+            .collect();
+        let hist = command_history(&cs, 15);
+        assert_eq!(hist.len(), 15, "capped to the limit");
+        assert_eq!(hist[0].id, "c19", "newest (last-appended) first");
+        assert_eq!(hist[14].id, "c5");
+        // Fewer than the cap: all shown, still newest-first.
+        cs.commands = vec![cmd_full("a", "reset", None, "done"), cmd_full("b", "reset", None, "pending")];
+        let hist = command_history(&cs, 15);
+        assert_eq!(hist.iter().map(|c| c.id.clone()).collect::<Vec<_>>(), vec!["b", "a"]);
     }
 }
