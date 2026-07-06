@@ -78,10 +78,16 @@ def make_server(host="127.0.0.1", port=0):
                     c = state.crews.get(uuid)
                     if not c:
                         return self._send(404)
-                    # first poll flips provisioning -> completed
+                    # first poll flips provisioning -> a terminal status. A crew
+                    # whose name contains "flop" reports failure (exercises the
+                    # poll-time Failed branch); everything else comes Online with
+                    # the real AMP prose string.
                     if c["status"] == "provisioning":
-                        c["status"] = "completed"
-                        c["public_url"] = f"https://{uuid}.crewai.com"
+                        if "flop" in c["name"]:
+                            c["status"] = "Provisioning Failed, try again."
+                        else:
+                            c["status"] = "Crew is Online"
+                            c["public_url"] = f"https://{uuid}.crewai.com"
                     return self._send(200, {"status": c["status"], "public_url": c["public_url"]})
             return self._send(404)
 

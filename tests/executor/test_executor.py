@@ -139,6 +139,14 @@ def test_create_failure_marks_failed():
     print("ok: create failure -> command error + deployment Failed")
 
 
+def test_failed_status_during_poll_marks_failed():
+    # A crew that provisions but reports a failed status while polling -> Failed + error.
+    out = _run(_state([_cmd("provision", "pharma/flop")]))
+    assert _cmd_state(out) == "error"
+    assert _dep("pharma/flop", out)["status"] == "Failed"
+    print("ok: failed poll status -> deployment Failed + command error")
+
+
 def test_secret_gate_noops_without_token():
     # No token => executor must no-op: command stays pending, exit 0.
     out = _run(_state([_cmd("provision", "pharma/your-own-data")]), token=None)

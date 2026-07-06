@@ -167,11 +167,13 @@ do_provision() { # sector slug  -> creates if absent, polls to Online
     [ "${AMP_HTTP:-}" = 200 ] || { sleep "$POLL_SLEEP"; continue; }
     st="$(jq -r '.status // ""' "$AMP_BODY")"
     PUBLIC_URL="$(jq -r '.public_url // ""' "$AMP_BODY")"
-    case "$st" in
-      completed|Completed|online|Online|running|Running|ready|Ready)
-        DEPLOY_STATUS="Online"; return 0 ;;
-      failed|Failed|error|Error|*_error|provisioning_failed)
-        DEPLOY_STATUS="Failed"; log "provision: $name reported status=$st"; return 1 ;;
+    # AMP's real strings are prose, e.g. "Crew is Online" — match on substrings,
+    # case-insensitively, rather than a brittle enum. Anything that isn't clearly
+    # online-or-failed is treated as still-in-progress and re-polled.
+    local lc; lc="$(printf '%s' "$st" | tr '[:upper:]' '[:lower:]')"
+    case "$lc" in
+      *online*)         DEPLOY_STATUS="Online"; return 0 ;;
+      *fail*|*error*)   DEPLOY_STATUS="Failed"; log "provision: $name reported status=$st"; return 1 ;;
     esac
     sleep "$POLL_SLEEP"
   done
