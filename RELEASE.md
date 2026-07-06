@@ -83,9 +83,14 @@ gh run list -R tbaums/amp-showcase-web-ui --workflow deploy.yml --limit 1
 curl -s https://tbaums.github.io/amp-showcase-web-ui/ | grep -oE '[^"/]*\.(wasm|js)"'
 #    -> the <hash> in amp-showcase-web-ui-<hash>_bg.wasm must differ from last release
 
-# c) the visible version bumped (what a returning client sees in the header)
-curl -s https://tbaums.github.io/amp-showcase-web-ui/ | grep -oE 'wm-ver[^<]*<[^>]*>[^<]*'
-#    -> or just open the site; the header reads "crewai / amp-showcase web UI v0.1.1"
+# c) the version is the new one. The header renders it at runtime from the WASM
+#    (the served index.html body is empty until the app mounts), so verify one of:
+#    - open the site: the header reads "crewai / amp-showcase web UI v<version>"; or
+#    - confirm the version literal is baked into the deployed bundle:
+WASM=$(curl -s https://tbaums.github.io/amp-showcase-web-ui/ | grep -oE 'amp-showcase-web-ui-[a-f0-9]+_bg\.wasm' | head -1)
+curl -s "https://tbaums.github.io/amp-showcase-web-ui/$WASM" | strings | grep -c '<the new version>'
+#    -> the new version string must be present (and the previous one absent). Its
+#       presence is also WHY the hash in (b) changed — same fact, two angles.
 ```
 
 If the hash didn't change, the cache-bust didn't happen — stop and find out why
