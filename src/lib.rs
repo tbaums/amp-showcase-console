@@ -3,12 +3,10 @@ pub mod models;
 pub mod storage;
 pub mod sync;
 
-/// The app version, from Cargo.toml at compile time. Surfaced in the UI (so a
-/// client can see which build it's on) AND — because `env!` bakes the literal
-/// into the WASM — bumping the version changes the compiled bytes, hence the
-/// content-hashed asset filename changes, forcing returning clients to fetch
-/// the new bundle. A version-only release therefore still busts the cache.
-pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+/// Re-exported from `app` (defined there so it resolves in both the lib and the
+/// binary crate). The version is surfaced in the UI and baked into the WASM, so
+/// a version bump changes the content-hashed asset filename and busts the cache.
+pub use app::VERSION;
 
 #[cfg(test)]
 mod version_tests {

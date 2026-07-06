@@ -7,6 +7,15 @@ use crate::models::{Command, ConsoleState, Deployment};
 use crate::storage;
 use crate::sync::{self, SyncConfig, SyncError};
 
+/// The app version, from Cargo.toml at compile time. Surfaced in the UI (so a
+/// client can see which build it's on) AND — because `env!` bakes the literal
+/// into the WASM — bumping the version changes the compiled bytes, hence the
+/// content-hashed asset filename changes, forcing returning clients to fetch the
+/// new bundle. A version-only release therefore still busts the cache. Defined
+/// here (not lib.rs) because `app` is compiled into both the lib and the binary
+/// crate, so `crate::VERSION` wouldn't resolve in the binary. lib.rs re-exports.
+pub const VERSION: &str = env!("CARGO_PKG_VERSION");
+
 // ── Navigation ──────────────────────────────────────────────────────────────
 
 #[derive(Clone, PartialEq, Debug)]
@@ -332,7 +341,7 @@ fn SetupView() -> impl IntoView {
                     <span class="wm-crew">"crewai"</span>
                     <span class="wm-sep">"/"</span>
                     <span class="wm-app">"amp-showcase web UI"</span>
-                    <span class="wm-ver" title="build version">{format!("v{}", crate::VERSION)}</span>
+                    <span class="wm-ver" title="build version">{format!("v{}", VERSION)}</span>
                 </div>
             </header>
 
@@ -466,7 +475,7 @@ fn DashboardView() -> impl IntoView {
                     <span class="wm-crew">"crewai"</span>
                     <span class="wm-sep">"/"</span>
                     <span class="wm-app">"amp-showcase web UI"</span>
-                    <span class="wm-ver" title="build version">{format!("v{}", crate::VERSION)}</span>
+                    <span class="wm-ver" title="build version">{format!("v{}", VERSION)}</span>
                 </div>
                 <button class="btn btn-ghost btn-sm" on:click=move |_| state.navigate(View::Setup)>
                     "Setup"
