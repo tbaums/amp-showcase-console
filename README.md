@@ -1,9 +1,9 @@
-# amp-showcase console
+# amp-showcase web UI
 
-**Live: https://tbaums.github.io/amp-showcase-console/** (GitHub Pages, published
+**Live: https://tbaums.github.io/amp-showcase-web-ui/** (GitHub Pages, published
 on every push to `main`).
 
-A dark-mode, monospace, single-page dashboard for CrewAI field engineers (FDEs)
+A dark-mode, monospace, single-page web dashboard for CrewAI field engineers (FDEs)
 to see and control their **AMP** demo/workshop deployments.
 
 Built with **Leptos 0.7 (Rust → WASM, CSR)**. Front-end only: there is no
@@ -15,13 +15,13 @@ channel.
 ## Architecture: FE → repo → Action
 
 The browser can't call the AMP API directly (CORS, and you don't want a
-long-lived AMP token in a browser). So the console treats a single
+long-lived AMP token in a browser). So the web UI treats a single
 `state.json` file in a private repo as the source of truth, and a GitHub Action
 in that repo is the privileged executor.
 
 ```
   ┌─────────────────────────┐        GitHub Contents API        ┌──────────────────────┐
-  │  amp-showcase console    │  ── fetch state.json (GET) ──▶    │  FDE private repo     │
+  │  amp-showcase web UI    │  ── fetch state.json (GET) ──▶    │  FDE private repo     │
   │  (Leptos/WASM in browser)│  ◀─ push state.json (PUT, sha) ─  │  └ state.json         │
   │                          │                                   │  └ .github/workflows/ │
   │  • render deployments    │                                   │      execute-commands │
@@ -40,7 +40,7 @@ in that repo is the privileged executor.
                                                              └──────────────────────────────┘
 ```
 
-1. The console renders `deployments[]` from `state.json`.
+1. The web UI renders `deployments[]` from `state.json`.
 2. Action buttons (Provision / Reset / Teardown, per-row or "all") **enqueue** a
    `Command { action, scenario, state:"pending" }` into `state.json` and push it
    (base64 Contents API PUT with the previous blob sha for optimistic concurrency).
@@ -48,7 +48,7 @@ in that repo is the privileged executor.
    schedule (and on manual dispatch), drains pending commands by calling the AMP
    API with repo secrets, writes results back into `state.json`
    (`deployments[].status`, `command.state="done"`), and commits.
-4. The console polls by re-fetching (Refresh button) and re-renders.
+4. The web UI polls by re-fetching (Refresh button) and re-renders.
 
 ### `state.json` schema
 
@@ -101,11 +101,11 @@ The workflow already has `permissions: contents: write` so the default
 ### 3. Create a scoped GitHub token for the browser
 Create a **fine-grained personal access token** scoped to **only** the single
 private state repo, with **Repository permissions → Contents: Read and write**.
-Nothing else. This is the token you paste into the console's Setup screen. It
+Nothing else. This is the token you paste into the web UI's Setup screen. It
 can read/write `state.json` and nothing more.
 
-### 4. Configure the console
-Open the console and fill the **Setup** screen:
+### 4. Configure the web UI
+Open the web UI and fill the **Setup** screen:
 - **GitHub token** — the fine-grained PAT from step 3
 - **State repo** — `owner/repo`
 - **Branch** — usually `main`
@@ -162,7 +162,7 @@ screen → dashboard → queue a command) is the next step — see the TODO in
 ## Project layout
 
 ```
-amp-console/
+amp-showcase-web-ui/
 ├─ Cargo.toml                         # leptos 0.7 csr, gloo-net, base64, uuid, web-sys
 ├─ Trunk.toml
 ├─ index.html                         # inline dark/mono theme + trunk data-links

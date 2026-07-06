@@ -1,6 +1,6 @@
 name: execute-commands
 
-# Executor for the amp-showcase console.
+# Executor for the amp-showcase web UI (the browser dashboard).
 #
 # The browser console never calls the AMP API directly (CORS + secret safety).
 # Instead it enqueues Command objects into state.json (state="pending"). This

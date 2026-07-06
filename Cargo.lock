@@ -12,7 +12,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "amp-console"
+name = "amp-showcase-web-ui"
 version = "0.1.0"
 dependencies = [
  "base64",

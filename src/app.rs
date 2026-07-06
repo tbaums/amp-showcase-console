@@ -328,14 +328,14 @@ fn SetupView() -> impl IntoView {
                 <div class="wordmark">
                     <span class="wm-crew">"crewai"</span>
                     <span class="wm-sep">"/"</span>
-                    <span class="wm-app">"amp-showcase console"</span>
+                    <span class="wm-app">"amp-showcase web UI"</span>
                 </div>
             </header>
 
             <div class="section-label">"Setup"</div>
             <p class="muted mb">
                 "Connect a private state repo. All state lives in a single "
-                <code>"state.json"</code>" the console reads and writes via the GitHub Contents API."
+                <code>"state.json"</code>" the web UI reads and writes via the GitHub Contents API."
             </p>
 
             <div class="card">
@@ -422,7 +422,7 @@ fn SetupView() -> impl IntoView {
             <div class="section-label mt">"Token scope"</div>
             <p class="muted">
                 "Use a fine-grained PAT limited to the single private state repo with "
-                <strong>"Contents: Read and write"</strong>". The console never calls the AMP API "
+                <strong>"Contents: Read and write"</strong>". The web UI never calls the AMP API "
                 "directly (CORS) — it enqueues commands that a GitHub Action in the repo executes."
             </p>
         </div>
@@ -461,7 +461,7 @@ fn DashboardView() -> impl IntoView {
                 <div class="wordmark">
                     <span class="wm-crew">"crewai"</span>
                     <span class="wm-sep">"/"</span>
-                    <span class="wm-app">"amp-showcase console"</span>
+                    <span class="wm-app">"amp-showcase web UI"</span>
                 </div>
                 <button class="btn btn-ghost btn-sm" on:click=move |_| state.navigate(View::Setup)>
                     "Setup"
