@@ -1,5 +1,8 @@
 # amp-showcase console
 
+**Live: https://tbaums.github.io/amp-showcase-console/** (GitHub Pages, published
+on every push to `main`).
+
 A dark-mode, monospace, single-page dashboard for CrewAI field engineers (FDEs)
 to see and control their **AMP** demo/workshop deployments.
 
